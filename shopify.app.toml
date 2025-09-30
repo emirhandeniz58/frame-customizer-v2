@@ -1,0 +1,31 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "877307f7ad4364ffeaa4b451fbf7f801"
+name = "frame-customizer-v2"
+application_url = "https://ordering-endless-morrison-reno.trycloudflare.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2025-10"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "/webhooks/app/uninstalled"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "/webhooks/app/scopes_update"
+
+[access_scopes]
+scopes = "write_products,read_products,write_orders,read_orders,write_draft_orders"
+
+[auth]
+redirect_urls = [ "https://ordering-endless-morrison-reno.trycloudflare.com/api/auth" ]
+
+[app_proxy]
+url = "/api"
+subpath = "customizer"
+prefix = "apps"
