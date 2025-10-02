@@ -1,21 +1,43 @@
-FROM node:18-alpine
-RUN apk add --no-cache openssl
+# 1. Build aşaması
+FROM node:18-alpine AS builder
 
-EXPOSE 3000
-
+# Çalışma klasörü
 WORKDIR /app
 
-ENV NODE_ENV=production
+# package.json ve lock dosyalarını kopyala
+COPY package*.json ./
 
-COPY package.json package-lock.json* ./
+# Bağımlılıkları yükle
+RUN npm ci
 
-RUN npm ci --omit=dev && npm cache clean --force
-# Remove CLI packages since we don't need them in production by default.
-# Remove this line if you want to run CLI commands in your container.
-RUN npm remove @shopify/cli
-
+# Uygulama kodunu kopyala
 COPY . .
 
+# Remix build işlemi
 RUN npm run build
 
-CMD ["npm", "run", "docker-start"]
+# 2. Production aşaması
+FROM node:18-alpine AS runner
+
+WORKDIR /app
+ENV NODE_ENV production
+
+# package.json ve lock dosyalarını kopyala
+COPY package*.json ./
+
+# Sadece production bağımlılıklarını yükle
+RUN npm ci --omit=dev
+
+# Build çıktısı ve public dosyalarını builder’dan al
+COPY --from=builder /app/build ./build
+COPY --from=builder /app/public ./public
+
+# Diğer gerekli dosyaları kopyala (ör: routes, config vs.)
+COPY . .
+
+# Fly.io port ayarı
+ENV PORT 8080
+EXPOSE 8080
+
+# Uygulama başlatma komutu
+CMD ["npm", "run", "start"]
