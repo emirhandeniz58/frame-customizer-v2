@@ -1,6 +1,5 @@
-import shopify, { authenticate, sessionStorage } from "../shopify.server";
-import { shopifyApi, LATEST_API_VERSION } from "@shopify/shopify-api";
-import prisma from "../db.server";
+// app/routes/api.custom-product.js
+import { json } from "@remix-run/node";
 
 const requestCache = new Map();
 const CACHE_DURATION = 5000;
@@ -101,8 +100,6 @@ async function findExistingVariant(admin, productId, boy, en, materyal) {
   }
 }
 
-// FIX: Varyantın tamamen hazır olmasını bekle ve fiyatı doğrula
-// waitForVariantReady fonksiyonunu güçlendir
 async function waitForVariantReady(
   admin,
   variantId,
@@ -111,7 +108,7 @@ async function waitForVariantReady(
 ) {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      await new Promise((resolve) => setTimeout(resolve, 600 * (i + 1))); // Daha uzun bekleme
+      await new Promise((resolve) => setTimeout(resolve, 600 * (i + 1)));
 
       const response = await withTimeout(
         admin.get({ path: `variants/${variantId}` }),
@@ -119,7 +116,6 @@ async function waitForVariantReady(
 
       const variant = response.body?.variant;
 
-      // FIX: Fiyatın STRING olarak geldiğinden emin ol
       if (variant && variant.price !== null && variant.price !== undefined) {
         const variantPrice = parseFloat(variant.price);
         const expected = parseFloat(expectedPrice);
@@ -128,7 +124,6 @@ async function waitForVariantReady(
           `✅ Varyant fiyatı doğrulandı (${i + 1}. deneme): ${variant.price} TL (Beklenen: ${expectedPrice})`,
         );
 
-        // Fiyat eşleşmese bile variant'ı dön (Shopify bazen farklı format kullanır)
         if (Math.abs(variantPrice - expected) < 0.01) {
           console.log("✅ Fiyat tam eşleşti!");
           return variant;
@@ -146,7 +141,6 @@ async function waitForVariantReady(
     }
   }
 
-  // Son deneme - her halükarda variant'ı dön
   try {
     const finalResponse = await admin.get({ path: `variants/${variantId}` });
     const finalVariant = finalResponse.body?.variant;
@@ -160,6 +154,14 @@ async function waitForVariantReady(
 
 export async function action({ request }) {
   try {
+    // ✅ Dinamik import - Server-only modülleri burada yükle
+    const { authenticate } = await import("../shopify.server");
+    const { sessionStorage } = await import("../shopify.server");
+    const { shopifyApi, LATEST_API_VERSION } = await import(
+      "@shopify/shopify-api"
+    );
+    const { prisma } = await import("../db.server");
+
     const { session } = await authenticate.public.appProxy(request);
 
     const adminSession = await sessionStorage.loadSession(session.id);
@@ -288,7 +290,6 @@ export async function action({ request }) {
     if (existingVariant) {
       console.log("✅ Mevcut varyant bulundu:", existingVariant.id);
 
-      // Fiyatı güncelle
       try {
         await withTimeout(
           admin.put({
@@ -303,7 +304,6 @@ export async function action({ request }) {
           }),
         );
 
-        // FIX: Güncellenmiş varyantı tekrar çek
         await new Promise((resolve) => setTimeout(resolve, 300));
         const updatedResponse = await admin.get({
           path: `variants/${existingVariant.id}`,
@@ -342,7 +342,6 @@ export async function action({ request }) {
         );
       } catch (err) {
         console.error("Fiyat güncelleme hatası:", err);
-        // Hata olsa bile mevcut varyantı dön
         requestCache.delete(cacheKey);
 
         return new Response(
@@ -374,18 +373,15 @@ export async function action({ request }) {
       }
     }
 
-    // YENİ VARYANT OLUŞTUR
     const timestamp = Date.now();
     const randomSuffix = Math.random().toString(36).substring(2, 8);
 
-    // FIX: Price'ı hem string hem de number olarak gönder
     const priceString = calculatedPrice.toFixed(2);
 
-    // YENİ VARYANT OLUŞTUR bölümünde
     const variantData = {
       variant: {
         product_id: productId,
-        price: priceString, // "99.99" formatında
+        price: priceString,
         sku: `CUSTOM-${timestamp}-${randomSuffix}`,
         inventory_management: "shopify",
         inventory_policy: "continue",
@@ -405,7 +401,7 @@ export async function action({ request }) {
       price: priceString,
       priceType: typeof priceString,
       weight: calculatedWeight,
-      fullData: variantData, // ← Tüm data'yı logla
+      fullData: variantData,
     });
 
     let newVariant;
@@ -429,7 +425,6 @@ export async function action({ request }) {
         priceType: typeof newVariant.price,
       });
 
-      // FIX: Varyantın tamamen hazır olmasını bekle
       const readyVariant = await waitForVariantReady(
         admin,
         newVariant.id,
@@ -441,7 +436,6 @@ export async function action({ request }) {
         console.log("✅ Varyant doğrulandı. Final price:", newVariant.price);
       }
 
-      // EKSTRA GÜVENLİK: Eğer price hala null/undefined ise manuel set et
       if (
         !newVariant.price ||
         newVariant.price === "0" ||
@@ -461,7 +455,6 @@ export async function action({ request }) {
             type: "application/json",
           });
 
-          // Tekrar kontrol et
           await new Promise((resolve) => setTimeout(resolve, 500));
           const updatedResponse = await admin.get({
             path: `variants/${newVariant.id}`,
@@ -568,8 +561,6 @@ export async function action({ request }) {
 
     requestCache.delete(cacheKey);
 
-    // FIX: Response'da fiyatı birden fazla formatta dön
-    // Final response öncesi
     const finalPrice = newVariant.price || calculatedPrice;
     const finalPriceString = String(finalPrice);
 
@@ -588,8 +579,8 @@ export async function action({ request }) {
         variant: {
           id: String(newVariant.id),
           gid: `gid://shopify/ProductVariant/${newVariant.id}`,
-          price: finalPriceString, // ← String olarak dön
-          price_numeric: parseFloat(finalPrice), // ← Numeric olarak da dön
+          price: finalPriceString,
+          price_numeric: parseFloat(finalPrice),
           formatted_price: `${finalPrice} TL`,
           weight: calculatedWeight,
         },
@@ -599,7 +590,6 @@ export async function action({ request }) {
           price: finalPriceString,
         },
         debug: {
-          // ← Geliştirme için debug bilgisi
           originalPrice: newVariant.price,
           calculatedPrice: calculatedPrice,
           priceString: priceString,
@@ -612,7 +602,7 @@ export async function action({ request }) {
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache", // ← Cache'i devre dışı bırak
+          "Cache-Control": "no-cache",
         },
       },
     );
