@@ -1,5 +1,5 @@
 # 1. Build aşaması
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 # Çalışma klasörü
 WORKDIR /app

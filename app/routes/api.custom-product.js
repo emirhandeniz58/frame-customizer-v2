@@ -1,17 +1,27 @@
 // app/routes/api.custom-product.jsx
-import shopify, { authenticate, sessionStorage } from "../shopify.server";
+import { json } from "@remix-run/node";
 import { shopifyApi, LATEST_API_VERSION } from "@shopify/shopify-api";
 
+// Handle POST (create custom product + draft order)
 export async function action({ request }) {
   try {
+    // ⬇️ import server-only code dynamically here
+    const {
+      authenticate,
+      sessionStorage,
+      default: shopify,
+    } = await import("../shopify.server");
+
+    // authenticate via app proxy
     const { session } = await authenticate.public.appProxy(request);
 
+    // load admin session
     const adminSession = await sessionStorage.loadSession(session.id);
-
     if (!adminSession) {
       throw new Error("Admin session bulunamadı");
     }
 
+    // setup shopify admin client
     const api = shopifyApi({
       apiKey: process.env.SHOPIFY_API_KEY,
       apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
@@ -22,42 +32,30 @@ export async function action({ request }) {
 
     const admin = new api.clients.Rest({ session: adminSession });
 
-    // Form verilerini al
+    // get form data
     const formData = await request.formData();
     const boy = formData.get("boy");
     const en = formData.get("en");
     const materyal = formData.get("materyal");
     const calculatedPrice = formData.get("calculatedPrice");
 
-    console.log("Özel ürün oluşturma isteği:", {
-      boy,
-      en,
-      materyal,
-      calculatedPrice,
-    });
-
-    // Validasyon
     if (!boy || !en || !materyal || !calculatedPrice) {
-      return new Response(
-        JSON.stringify({
+      return json(
+        {
           success: false,
           error: "Eksik parametreler: boy, en, materyal ve fiyat gerekli",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
         },
+        { status: 400 },
       );
     }
 
-    // Ürün bilgileri
     const productTitle = `Özel Masa ${boy}×${en}cm - ${materyal}`;
     const productHandle = `ozel-masa-${boy}x${en}-${materyal
       .toLowerCase()
       .replace(/\s+/g, "-")}-${Date.now()}`;
     const area = parseInt(boy) * parseInt(en);
 
-    // 1. Ürünü oluştur
+    // 1. create product
     const productResponse = await admin.post({
       path: "products",
       data: {
@@ -76,7 +74,7 @@ export async function action({ request }) {
           `,
           product_type: "Custom Furniture",
           vendor: "Custom Design",
-          status: "active", // Aktif ürün
+          status: "active",
           tags: `custom,masa,özel,${materyal.toLowerCase()}`,
           published_scope: "global",
           variants: [
@@ -96,9 +94,8 @@ export async function action({ request }) {
     });
 
     const product = productResponse.body.product;
-    console.log("Ürün oluşturuldu:", product.id);
 
-    // 2. Draft Order oluştur (sepete ekleme için)
+    // 2. create draft order
     const draftOrderResponse = await admin.post({
       path: "draft_orders",
       data: {
@@ -118,10 +115,9 @@ export async function action({ request }) {
     });
 
     const draftOrder = draftOrderResponse.body.draft_order;
-    console.log("Draft order oluşturuldu:", draftOrder.id);
 
-    return new Response(
-      JSON.stringify({
+    return json(
+      {
         success: true,
         product: {
           id: product.id,
@@ -135,11 +131,10 @@ export async function action({ request }) {
           id: draftOrder.id,
           invoice_url: draftOrder.invoice_url,
         },
-      }),
+      },
       {
         status: 200,
         headers: {
-          "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "POST, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
@@ -148,25 +143,21 @@ export async function action({ request }) {
     );
   } catch (error) {
     console.error("Ürün oluşturma hatası:", error);
-
-    return new Response(
-      JSON.stringify({
+    return json(
+      {
         success: false,
         error: "Ürün oluşturulamadı: " + error.message,
         details: error.stack,
-      }),
+      },
       {
         status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
+        headers: { "Access-Control-Allow-Origin": "*" },
       },
     );
   }
 }
 
-// OPTIONS isteği için CORS desteği
+// Handle preflight OPTIONS (CORS)
 export async function loader({ request }) {
   if (request.method === "OPTIONS") {
     return new Response(null, {
@@ -178,13 +169,5 @@ export async function loader({ request }) {
     });
   }
 
-  return new Response(
-    JSON.stringify({
-      error: "Method not allowed",
-    }),
-    {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    },
-  );
+  return json({ error: "Method not allowed" }, { status: 405 });
 }
