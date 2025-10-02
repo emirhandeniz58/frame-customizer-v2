@@ -1,16 +1,18 @@
 // app/routes/api.custom-product.jsx
-import { json } from "@remix-run/node";
-import { shopifyApi, LATEST_API_VERSION } from "@shopify/shopify-api";
 
 // Handle POST (create custom product + draft order)
 export async function action({ request }) {
   try {
-    // ⬇️ import server-only code dynamically here
+    // ✅ Dinamik import - tüm server-only modüller
     const {
       authenticate,
       sessionStorage,
       default: shopify,
     } = await import("../shopify.server");
+
+    const { shopifyApi, LATEST_API_VERSION } = await import(
+      "@shopify/shopify-api"
+    );
 
     // authenticate via app proxy
     const { session } = await authenticate.public.appProxy(request);
@@ -40,12 +42,15 @@ export async function action({ request }) {
     const calculatedPrice = formData.get("calculatedPrice");
 
     if (!boy || !en || !materyal || !calculatedPrice) {
-      return json(
-        {
+      return new Response(
+        JSON.stringify({
           success: false,
           error: "Eksik parametreler: boy, en, materyal ve fiyat gerekli",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
         },
-        { status: 400 },
       );
     }
 
@@ -116,8 +121,8 @@ export async function action({ request }) {
 
     const draftOrder = draftOrderResponse.body.draft_order;
 
-    return json(
-      {
+    return new Response(
+      JSON.stringify({
         success: true,
         product: {
           id: product.id,
@@ -131,10 +136,11 @@ export async function action({ request }) {
           id: draftOrder.id,
           invoice_url: draftOrder.invoice_url,
         },
-      },
+      }),
       {
         status: 200,
         headers: {
+          "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "POST, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
@@ -143,15 +149,18 @@ export async function action({ request }) {
     );
   } catch (error) {
     console.error("Ürün oluşturma hatası:", error);
-    return json(
-      {
+    return new Response(
+      JSON.stringify({
         success: false,
         error: "Ürün oluşturulamadı: " + error.message,
         details: error.stack,
-      },
+      }),
       {
         status: 500,
-        headers: { "Access-Control-Allow-Origin": "*" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
       },
     );
   }
@@ -169,5 +178,8 @@ export async function loader({ request }) {
     });
   }
 
-  return json({ error: "Method not allowed" }, { status: 405 });
+  return new Response(JSON.stringify({ error: "Method not allowed" }), {
+    status: 405,
+    headers: { "Content-Type": "application/json" },
+  });
 }
